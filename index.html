@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pet Vision AI Dashboard - 通用視覺辨識儀表板</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Orbitron', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- FontAwesome 圖示與 Google 字型 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@600;800;900&display=swap" rel="stylesheet">
+
+  <!-- TensorFlow.js & Teachable Machine Image Library -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+  <style>
+    body { background-color: #090d16; font-family: 'Inter', sans-serif; overflow-x: hidden; }
+    .glass-card { background: rgba(15, 23, 42, 0.70); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4); }
+    .glass-input { background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(255, 255, 255, 0.12); }
+    
+    .hud-corner-tl { position: absolute; top: 12px; left: 12px; border-top: 3px solid #38bdf8; border-left: 3px solid #38bdf8; width: 20px; height: 20px; pointer-events: none; z-index: 10; }
+    .hud-corner-tr { position: absolute; top: 12px; right: 12px; border-top: 3px solid #38bdf8; border-right: 3px solid #38bdf8; width: 20px; height: 20px; pointer-events: none; z-index: 10; }
+    .hud-corner-bl { position: absolute; bottom: 12px; left: 12px; border-bottom: 3px solid #38bdf8; border-left: 3px solid #38bdf8; width: 20px; height: 20px; pointer-events: none; z-index: 10; }
+    .hud-corner-br { position: absolute; bottom: 12px; right: 12px; border-bottom: 3px solid #38bdf8; border-right: 3px solid #38bdf8; width: 20px; height: 20px; pointer-events: none; z-index: 10; }
+
+    .scanline { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, #38bdf8, transparent); box-shadow: 0 0 15px #38bdf8; animation: scan 2.5s linear infinite; z-index: 8; pointer-events: none; }
+    @keyframes scan { 0% { top: 0%; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.8); border-radius: 3px; }
+  </style>
+</head>
+<body class="text-slate-100 min-h-screen flex flex-col justify-between selection:bg-sky-500 selection:text-white">
+
+  <!-- 頂部 Header 控制列 -->
+  <header class="glass-card sticky top-0 z-50 px-4 py-3 border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="p-2.5 bg-gradient-to-tr from-indigo-600 to-pink-500 rounded-xl shadow-lg shadow-pink-500/20">
+          <i class="fa-solid fa-brain text-xl text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold font-display tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-amber-300 to-emerald-400">
+            Pet Vision AI
+          </h1>
+          <p class="text-[11px] text-slate-400 font-mono">即時影像動態分類檢測儀表板</p>
+        </div>
+      </div>
+
+      <div class="flex items-center w-full md:w-auto space-x-2">
+        <div class="relative flex-grow md:w-96">
+          <i class="fa-solid fa-link absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+          <input 
+            type="text" 
+            id="modelUrlInput"
+            value="https://teachablemachine.withgoogle.com/models/6d9pVRPuI/"
+            placeholder="請輸入 Teachable Machine 模型 URL..."
+            class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg glass-input text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all font-mono"
+          />
+        </div>
+        <button 
+          onclick="reloadModel()"
+          class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-95 text-white transition-all shadow-md shadow-sky-600/30 flex items-center space-x-1.5 whitespace-nowrap"
+        >
+          <i class="fa-solid fa-rotate"></i>
+          <span>載入模型</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主內容分欄 -->
+  <main class="max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow">
+    
+    <!-- 左側：視訊與畫面 -->
+    <section class="lg:col-span-7 flex flex-col space-y-4">
+      <div class="glass-card rounded-2xl p-4 relative overflow-hidden flex flex-col items-center justify-center border border-slate-800/80">
+        
+        <div class="w-full flex justify-between items-center mb-3 px-1 text-xs text-slate-400 font-mono">
+          <div class="flex items-center space-x-2">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" id="statusDot"></span>
+            <span id="statusText" class="text-slate-300 font-medium tracking-wider">OPTICAL FEED</span>
+          </div>
+          <div class="flex space-x-4 bg-slate-900/60 px-3 py-1 rounded-full border border-slate-800">
+            <span>FPS: <span id="fpsVal" class="text-sky-400 font-bold">--</span></span>
+            <span>LATENCY: <span id="latencyVal" class="text-sky-400 font-bold">--</span> ms</span>
+          </div>
+        </div>
+
+        <div id="videoContainer" class="relative w-full aspect-square max-w-[480px] bg-slate-950 rounded-xl overflow-hidden shadow-2xl flex items-center justify-center border border-slate-800">
+          <div class="hud-corner-tl"></div>
+          <div class="hud-corner-tr"></div>
+          <div class="hud-corner-bl"></div>
+          <div class="hud-corner-br"></div>
+          
+          <div id="scanline" class="scanline"></div>
+
+          <!-- 原生 HTML5 Video -->
+          <video id="webcam" class="w-full h-full object-cover transform -scale-x-100" autoplay playsinline muted></video>
+
+          <!-- 圖片測試預覽 -->
+          <img id="testImg" class="w-full h-full object-cover hidden" alt="Test Feed" />
+
+          <!-- 特效 Canvas -->
+          <canvas id="particleCanvas" class="absolute inset-0 pointer-events-none z-20"></canvas>
+
+          <!-- 載入與權限提示 -->
+          <div id="loadingOverlay" class="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center space-y-3 z-30 transition-all">
+            <div id="spinner" class="w-10 h-10 border-4 border-sky-500/20 border-t-sky-500 rounded-full animate-spin"></div>
+            <p id="loadingText" class="text-xs text-slate-300 font-medium tracking-wider">正在初始化鏡頭與模型數據...</p>
+            
+            <div id="errorActions" class="hidden flex flex-col items-center space-y-2 mt-2 w-full max-w-xs">
+              <button onclick="startCamera()" class="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold shadow-md transition-all">
+                <i class="fa-solid fa-arrows-rotate"></i> 重試啟動鏡頭
+              </button>
+              <label class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold cursor-pointer transition-all flex items-center justify-center gap-2">
+                <i class="fa-solid fa-upload text-pink-400"></i>
+                <span>上傳圖片進行測試</span>
+                <input type="file" accept="image/*" class="hidden" onchange="uploadImage(event)" />
+              </label>
+            </div>
+          </div>
+
+          <div class="absolute top-3 right-3 z-20 bg-slate-900/80 backdrop-blur-md border border-slate-700/50 px-2.5 py-1 rounded-full flex items-center space-x-1.5 text-[10px] text-red-400 font-bold tracking-wider">
+            <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+            <span>LIVE</span>
+          </div>
+        </div>
+
+        <div class="w-full flex items-center justify-between mt-4 px-1">
+          <div class="flex items-center space-x-2 text-xs text-slate-400">
+            <i class="fa-solid fa-circle-info text-sky-400" id="statusIcon"></i>
+            <span id="modelStatusMsg">模型狀態：連線中...</span>
+          </div>
+          <button onclick="takeSnapshot()" class="px-3.5 py-1.5 text-xs rounded-lg glass-card hover:bg-slate-800 text-slate-200 transition-all border border-slate-700 flex items-center space-x-2 active:scale-95 shadow-md">
+            <i class="fa-solid fa-camera text-sky-400"></i>
+            <span>畫面快照 (Snapshot)</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右側：即時辨識數據面板 -->
+    <section class="lg:col-span-5 flex flex-col space-y-4">
+      <div id="stateCard" class="glass-card rounded-2xl p-5 border border-slate-800 transition-all duration-500 relative overflow-hidden">
+        <div class="flex items-start justify-between">
+          <div>
+            <p class="text-[11px] font-mono tracking-wider text-slate-400 uppercase">當前最高辨識結果 (TOP PREDICTION)</p>
+            <h2 id="activeStateLabel" class="text-3xl font-extrabold mt-1 font-display tracking-wide text-slate-100 flex items-center gap-2">
+              --
+            </h2>
+          </div>
+          <div id="stateIcon" class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl bg-slate-800/80 text-slate-400 border border-slate-700/80">
+            <i class="fa-solid fa-crosshairs"></i>
+          </div>
+        </div>
+
+        <p id="stateDesc" class="text-xs text-slate-400 mt-2 min-h-[32px] leading-relaxed">
+          模型辨識數據即時運算中...
+        </p>
+
+        <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-end justify-between">
+          <span class="text-xs text-slate-400 font-medium">主要標籤信心度 (Confidence)</span>
+          <span id="activeConfidence" class="text-3xl font-black font-display text-sky-400">0.0%</span>
+        </div>
+      </div>
+
+      <!-- 動態分類機率條容器 -->
+      <div class="glass-card rounded-2xl p-5 border border-slate-800/80 space-y-4">
+        <h3 class="text-xs font-mono text-slate-400 uppercase tracking-wider flex items-center justify-between">
+          <span>動態分類機率分佈</span>
+          <span class="text-[10px] text-sky-400" id="classCountTag">自動解析中</span>
+        </h3>
+
+        <!-- 機率動態生成的容器 -->
+        <div id="probabilityBarsContainer" class="space-y-3">
+          <div class="text-xs text-slate-500 text-center py-4">模型載入後將自動生成標籤...</div>
+        </div>
+      </div>
+
+      <!-- 事件紀錄列表 -->
+      <div class="glass-card rounded-2xl p-5 border border-slate-800/80 flex-grow flex flex-col justify-between min-h-[180px]">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-mono text-slate-400 uppercase tracking-wider flex items-center space-x-2">
+            <i class="fa-solid fa-clock-rotate-left text-sky-400"></i>
+            <span>事件紀錄 (Event History)</span>
+          </h3>
+          <button onclick="clearEventLogs()" class="text-[10px] text-slate-500 hover:text-slate-300 transition-colors">清空紀錄</button>
+        </div>
+        <div id="eventLogList" class="space-y-2 max-h-[150px] overflow-y-auto pr-1 text-xs">
+          <div class="text-slate-500 text-center py-6 italic font-sans">尚未觸發高高信心度事件...</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="text-center py-3 text-xs text-slate-600 border-t border-slate-900/80">
+    <p>Pet Vision AI Dashboard &copy; 2026 Powered by Teachable Machine</p>
+  </footer>
+
+  <script>
+    let model, videoElement;
+    let isVideoReady = false;
+    let isPredicting = false;
+    let lastFrameTime = performance.now();
+    let frameCount = 0;
+
+    let lastLoggedClass = "";
+    let lastLoggedTime = 0;
+    const LOG_DEBOUNCE_MS = 2500;
+
+    let particles = [];
+    let currentThemeColor = "#38bdf8";
+
+    const particleCanvas = document.getElementById('particleCanvas');
+    const ctx = particleCanvas.getContext('2d');
+
+    const COLOR_PALETTE = [
+      { text: 'text-pink-400', bg: 'bg-pink-500', from: 'from-pink-600', to: 'to-pink-400', border: 'rgba(236, 72, 153, 0.4)', hex: '#f472b6' },
+      { text: 'text-amber-400', bg: 'bg-amber-500', from: 'from-amber-600', to: 'to-yellow-400', border: 'rgba(245, 158, 11, 0.4)', hex: '#fbbf24' },
+      { text: 'text-emerald-400', bg: 'bg-emerald-500', from: 'from-emerald-600', to: 'to-teal-400', border: 'rgba(16, 185, 129, 0.4)', hex: '#34d399' },
+      { text: 'text-sky-400', bg: 'bg-sky-500', from: 'from-sky-600', to: 'to-cyan-400', border: 'rgba(56, 189, 248, 0.4)', hex: '#38bdf8' },
+      { text: 'text-purple-400', bg: 'bg-purple-500', from: 'from-purple-600', to: 'to-indigo-400', border: 'rgba(192, 132, 252, 0.4)', hex: '#c084fc' }
+    ];
+
+    function resizeCanvas() {
+      particleCanvas.width = particleCanvas.clientWidth;
+      particleCanvas.height = particleCanvas.clientHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      resizeCanvas();
+      initParticleLoop();
+      videoElement = document.getElementById('webcam');
+      
+      await reloadModel();
+      await startCamera();
+    });
+
+    // --- 1. WebCam 啟動 ---
+    async function startCamera() {
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const spinner = document.getElementById('spinner');
+      const loadingText = document.getElementById('loadingText');
+      const errorActions = document.getElementById('errorActions');
+
+      loadingOverlay.classList.remove('hidden');
+      spinner.classList.remove('hidden');
+      errorActions.classList.add('hidden');
+      loadingText.innerText = "正在請求鏡頭存取權限...";
+
+      const constraintsOptions = [
+        { video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" } },
+        { video: true }
+      ];
+
+      let stream = null;
+      for (const constraints of constraintsOptions) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (stream) break;
+        } catch (e) {
+          console.warn("Camera fallback retry...", e);
+        }
+      }
+
+      if (stream) {
+        videoElement.srcObject = stream;
+        videoElement.onloadedmetadata = () => {
+          videoElement.play();
+          isVideoReady = true;
+          loadingOverlay.classList.add('hidden');
+
+          if (!isPredicting) {
+            isPredicting = true;
+            requestAnimationFrame(predictLoop);
+          }
+        };
+      } else {
+        spinner.classList.add('hidden');
+        loadingText.innerHTML = "<span class='text-amber-400'>視訊鏡頭無回應</span><br/><span class='text-[11px] text-slate-400'>您可以直接上傳本地圖片進行推論測試。</span>";
+        errorActions.classList.remove('hidden');
+      }
+    }
+
+    // --- 2. 圖片上傳備援 ---
+    function uploadImage(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const testImg = document.getElementById('testImg');
+        testImg.src = event.target.result;
+        testImg.classList.remove('hidden');
+        videoElement.classList.add('hidden');
+
+        document.getElementById('loadingOverlay').classList.add('hidden');
+
+        testImg.onload = async () => {
+          if (model) {
+            const predictions = await model.predict(testImg);
+            processPredictions(predictions);
+          }
+        };
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // --- 3. 載入模型與動態生成 UI 結構 ---
+    async function reloadModel() {
+      let URL = document.getElementById('modelUrlInput').value.trim();
+      if (!URL) return;
+      if (!URL.endsWith('/')) URL += '/';
+
+      const statusMsg = document.getElementById('modelStatusMsg');
+      statusMsg.innerText = "模型載入中...";
+
+      try {
+        model = await tmImage.load(URL + 'model.json', URL + 'metadata.json');
+        statusMsg.innerText = "模型狀態：已成功連線";
+        document.getElementById('statusIcon').className = "fa-solid fa-circle-check text-emerald-400";
+
+        // 自動動態構建 UI 機率長條列
+        buildDynamicUI(model.getClassLabels());
+      } catch (err) {
+        console.error("Model Loading Error:", err);
+        statusMsg.innerText = "模型載入失敗，請確認 URL";
+        document.getElementById('statusIcon').className = "fa-solid fa-circle-xmark text-red-400";
+      }
+    }
+
+    function buildDynamicUI(classLabels) {
+      const container = document.getElementById('probabilityBarsContainer');
+      document.getElementById('classCountTag').innerText = `已解析 ${classLabels.length} 個分類標籤`;
+      container.innerHTML = '';
+
+      classLabels.forEach((label, idx) => {
+        const palette = COLOR_PALETTE[idx % COLOR_PALETTE.length];
+        const barHtml = `
+          <div class="space-y-1">
+            <div class="flex justify-between text-xs font-medium">
+              <span class="flex items-center space-x-1.5 ${palette.text}">
+                <i class="fa-solid fa-tag text-[10px]"></i>
+                <span class="font-mono font-bold">${label}</span>
+              </span>
+              <span id="probText_${idx}" class="font-mono text-slate-300">0.0%</span>
+            </div>
+            <div class="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-slate-800">
+              <div id="probBar_${idx}" class="h-full bg-gradient-to-r ${palette.from} ${palette.to} rounded-full transition-all duration-150" style="width: 0%"></div>
+            </div>
+          </div>
+        `;
+        container.innerHTML += barHtml;
+      });
+    }
+
+    // --- 4. 辨識迴圈 ---
+    async function predictLoop() {
+      if (isPredicting && model && isVideoReady && videoElement.readyState >= 2) {
+        const startTime = performance.now();
+        
+        const predictions = await model.predict(videoElement);
+        
+        const latency = Math.round(performance.now() - startTime);
+        document.getElementById('latencyVal').innerText = latency;
+
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFrameTime >= 1000) {
+          document.getElementById('fpsVal').innerText = frameCount;
+          frameCount = 0;
+          lastFrameTime = now;
+        }
+
+        processPredictions(predictions);
+      }
+      requestAnimationFrame(predictLoop);
+    }
+
+    // --- 5. 數據處理與介面更新 ---
+    function processPredictions(predictions) {
+      let topClass = "";
+      let topProb = -1;
+      let topIndex = 0;
+
+      predictions.forEach((p, idx) => {
+        const prob = p.probability;
+
+        // 即時更新個別機率條
+        const bar = document.getElementById(`probBar_${idx}`);
+        const text = document.getElementById(`probText_${idx}`);
+        if (bar && text) {
+          bar.style.width = `${(prob * 100).toFixed(1)}%`;
+          text.innerText = `${(prob * 100).toFixed(1)}%`;
+        }
+
+        if (prob > topProb) {
+          topProb = prob;
+          topClass = p.className;
+          topIndex = idx;
+        }
+      });
+
+      document.getElementById('activeConfidence').innerText = `${(topProb * 100).toFixed(1)}%`;
+
+      updateDynamicTheme(topClass, topProb, topIndex);
+
+      if (topProb >= 0.7) {
+        logEventHistory(topClass, topProb);
+      }
+    }
+
+    function updateDynamicTheme(className, confidence, classIndex) {
+      const activeStateLabel = document.getElementById('activeStateLabel');
+      const stateIcon = document.getElementById('stateIcon');
+      const stateDesc = document.getElementById('stateDesc');
+      const stateCard = document.getElementById('stateCard');
+
+      const palette = COLOR_PALETTE[classIndex % COLOR_PALETTE.length];
+      currentThemeColor = palette.hex;
+
+      activeStateLabel.innerHTML = `<span class="${palette.text}">${className}</span>`;
+      stateIcon.innerHTML = `<i class="fa-solid fa-bullseye ${palette.text}"></i>`;
+      stateDesc.innerText = `目前即時影像特徵最高符合項目為 [${className}]，信心度為 ${(confidence * 100).toFixed(1)}%。`;
+      stateCard.style.borderColor = palette.border;
+    }
+
+    function logEventHistory(className, confidence) {
+      const now = Date.now();
+      if (className === lastLoggedClass && (now - lastLoggedTime) < LOG_DEBOUNCE_MS) return;
+
+      lastLoggedClass = className;
+      lastLoggedTime = now;
+
+      const timeStr = new Date().toLocaleTimeString();
+      const eventLogList = document.getElementById('eventLogList');
+
+      if (eventLogList.children[0] && eventLogList.children[0].classList.contains('italic')) {
+        eventLogList.innerHTML = '';
+      }
+
+      const logItem = document.createElement('div');
+      logItem.className = "flex items-center justify-between p-2 rounded-lg bg-slate-900/80 border border-slate-800 font-mono";
+      logItem.innerHTML = `
+        <span class="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-800 text-sky-300">${className}</span>
+        <span class="text-[10px] text-slate-500">${timeStr} (${(confidence * 100).toFixed(0)}%)</span>
+      `;
+      eventLogList.prepend(logItem);
+    }
+
+    function clearEventLogs() {
+      document.getElementById('eventLogList').innerHTML = `<div class="text-slate-500 text-center py-6 italic font-sans">尚未觸發高信心度事件...</div>`;
+      lastLoggedClass = "";
+    }
+
+    // --- 6. 動態粒子背景特效 ---
+    function initParticleLoop() {
+      setInterval(() => {
+        if (particles.length < 20) particles.push(createParticle());
+      }, 300);
+
+      function render() {
+        ctx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.y -= p.speedY;
+          p.alpha -= p.decay;
+          if (p.alpha <= 0 || p.y < 0) {
+            particles.splice(i, 1);
+            continue;
+          }
+          ctx.save();
+          ctx.globalAlpha = p.alpha;
+          ctx.font = `${p.size}px sans-serif`;
+          ctx.fillStyle = p.color;
+          ctx.fillText(p.symbol, p.x, p.y);
+          ctx.restore();
+        }
+        requestAnimationFrame(render);
+      }
+      render();
+    }
+
+    function createParticle() {
+      const w = particleCanvas.width || 400;
+      const h = particleCanvas.height || 400;
+
+      return {
+        x: Math.random() * (w - 20) + 10,
+        y: h - 10,
+        speedY: Math.random() * 1.2 + 0.6,
+        size: Math.random() * 8 + 12,
+        symbol: "✨",
+        color: currentThemeColor,
+        alpha: 1.0,
+        decay: 0.012
+      };
+    }
+
+    function takeSnapshot() {
+      const snapCanvas = document.createElement('canvas');
+      const source = videoElement.classList.contains('hidden') ? document.getElementById('testImg') : videoElement;
+
+      snapCanvas.width = source.videoWidth || source.naturalWidth || 480;
+      snapCanvas.height = source.videoHeight || source.naturalHeight || 480;
+      const snapCtx = snapCanvas.getContext('2d');
+      snapCtx.drawImage(source, 0, 0);
+
+      const link = document.createElement('a');
+      link.download = `snapshot_${Date.now()}.png`;
+      link.href = snapCanvas.toDataURL('image/png');
+      link.click();
+    }
+  </script>
+</body>
+</html>
